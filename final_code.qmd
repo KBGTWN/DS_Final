@@ -5,4 +5,260 @@ format:
   html:
     self-contained: true
 editor: visual
+editor_options: 
+  chunk_output_type: console
 ---
+
+
+#Note this is for stretch exercise 7 submission
+
+#Project Description
+This project was inspired by the revelations of rental market collusion through Yieldstar. Rental market collusion poses serious risks for low and middle income families, as purchasing homes outright has become increasingly costly. Our goal is to identify cases where the value of a particular housing arrangement is out of line with the underlying characteristics, suggesting price inflation and possible rental collusion. The goal of this analysis is to develop a predictive model that will identify geographic areas with rents above what is considered fair market. 
+
+The data sets that will be used for this is the 2021 IPUMS ACS 1-year survey and the HUD Fair Market Rent data from 2021, which are used to calculate the payment standards for Housing Choice Voucher programs, among other housing assistance policies. The variable of interest is going to be predicted rental prices. Variables used to evaluate this include: Ownership length, group quarters status, metro status, population density within the PUMA, PUMA (public use microdata area), Census region and division, House Value, Vacancy Status, building year, bedroom count, bathroom count, and household income. 
+
+###loading libraries 
+```{r}
+library(tidyverse)
+library(ipumsr)
+library(tidymodels)
+library(sf)
+library(readxl)
+library(tigris)
+library(haven)
+library(foreach)
+```
+
+###Loading Raw Data 
+```{r}
+ddi <- read_ipums_ddi("usa_00002.xml")
+data <- read_ipums_micro(ddi)
+usshape <- read_ipums_sf("ipums_puma_2010")
+fh_data <- read_xlsx("SAFMRS21.xlsx")
+```
+
+###cleaning data prior to analysis 
+
+```{r}
+#Converting label data to panacea variable types 
+#removing variables that are unnecessary 
+data <- data%>%
+  select(!YEAR)
+
+data%>%
+  ipums_val_labels(SAMPLE)
+
+#sample appears irrelevant, we already know its all of 2021 1 year ACS
+
+data <- data%>%
+  select(!SAMPLE)
+
+#cluster and strata is also unnecessary because we are not using the taylor series linear approx
+data <- data%>%
+  select(!CLUSTER)
+
+data <- data%>%
+  select(!STRATA)
+
+#PROPTX99 not included with rental data, not relevant 
+data <- data%>%
+  select(!PROPTX99)
+
+
+var <- c('HHTYPE', 'REGION', 'STATEFIP', 'COUNTYFIP', 'METRO', 'PUMA', 'GQ', 'OWNERSHP', 'OWNERSHPD', 'RENT', 'RENTGRS',
+         'HHINCOME', 'FOODSTMP', 'VALUEH', 'VACANCY', 'KITCHEN', 'BUILTYR2', 'BEDROOMS')
+
+
+for (i in var) {
+data%>%
+  ipums_val_labels(i)
+}
+
+#above did not cycle through all of them and report individually - moving to indivudal proction
+data%>%
+  ipums_val_labels(KITCHEN)
+
+data%>%
+  ipums_val_labels(HHTYPE)
+
+data%>%
+  ipums_val_labels(HHINCOME)
+
+data%>%
+  ipums_val_labels(HHTYPE)
+
+data%>%
+  ipums_val_labels(BUILTYR2)
+
+data%>%
+  ipums_val_labels(STATEFIP)
+
+data%>%
+  ipums_val_labels(GQ)
+
+data%>%
+  ipums_val_labels(OWNERSHP)
+
+data%>%
+  ipums_val_labels(OWNERSHPD)
+
+data%>%
+  ipums_val_labels(RENTGRS)
+
+data%>%
+  ipums_val_labels(RENT)
+
+data%>%
+ipums_var_info(RENT)
+
+data%>%
+  ipums_val_labels(VALUEH)
+
+data%>%
+  ipums_val_labels(FOODSTMP)
+
+data%>%
+  ipums_val_labels(VACANCY)
+
+data%>%
+  ipums_val_labels(BEDROOMS)
+
+#all of the above can be converted into factor variables directly 
+
+data <- data%>%
+  mutate(HHTYPE = as.factor(HHTYPE),
+         REGION = as.factor(REGION),
+         STATEFIP = as.factor(STATEFIP),
+         METRO = as.factor(METRO),
+         GQ = as.factor(GQ),
+         OWNERSHP = as.factor(OWNERSHP), 
+         OWNERSHPD = as.factor(OWNERSHPD), 
+         RENT = as.factor(RENT),
+         RENTGRS = as.factor(RENTGRS),
+         FOODSTMP = as.factor(FOODSTMP),
+         VALUEH = as.factor(VALUEH), 
+         VACANCY = as.factor(VACANCY), 
+         KITCHEN = as.factor(KITCHEN),
+         BUILTYR2 = as.factor(BUILTYR2),
+         BEDROOMS = as.factor(BEDROOMS)
+  )
+
+
+
+
+```
+
+
+
+
+
+#Step 1: Splitting and setting up
+
+###Splitting data
+```{r}
+set.seed(9940)
+acs_split <- initial_split(data, prop = 8/10)
+train_data <- training(acs_split)
+test_data <- testing(acs_split)
+
+```
+
+### EDA 
+
+
+```{r}
+#gathering general stats on the variables 
+ipums_train2 <- train_data %>%
+  filter(RENT > ) %>%
+  group_by(PUMA, STATEFIP) %>%
+  summarize(mean_rent = mean(RENT))
+
+ipums_train2%>%
+  group_by(HHTYPE)%>%
+  summarize()
+
+```
+
+
+```{r}
+ipums_map <- ipums_shape_inner_join(ipums_train2, us_shape, by = c("PUMA", "STATEFIP"))
+ipums_map <- ipums_map %>%
+  filter(State != "Alaska") %>%
+  filter(State != "Hawaii")
+# Examining the geographic characteristics of the data
+ggplot(data = ipums_map, aes(fill = mean_rent)) +
+  geom_sf() +
+  scale_fill_gradient(low = "red", high = "green")
+```
+```{r}
+# This is a little cluttered, so we're going to focus on Texas specifically
+ipums_tex <- ipums_map %>%
+  filter(State == "Texas")
+ggplot(data = ipums_tex, aes(fill = mean_rent)) +
+  geom_sf() +
+  scale_fill_gradient(low = "red", high = "green")
+```
+
+```{r}
+# Based on this, we can see some significant price differences within the state
+# Particularly, rural border areas are relatively inexpensive, while cities are much higher in value
+# Not exactly surprising, but what if we narrow in on a particular area, like Austin?
+```
+```{r}
+ipums_aus <- ipums_tex %>%
+  filter(str_detect(Name,"^Austin City"))
+ggplot(data = ipums_aus, aes(fill = mean_rent)) +
+  geom_sf() +
+  scale_fill_gradient(low = "red", high = "green")
+#This gives us a nice spread! Although the scale isn't that wide, we can see across Austin rents can differ by around 600ish
+#Lets compare it to our fair market data, to see about what the average housing voucher might be worth in Austin
+fairdata %>%
+  filter(countyname == "Austin County")
+# These rents are given for different numbers of bedrooms across the county
+# Based on the previous visualization, only a four-bedroom apartment approaches the average in any PUMA
+# Let's rework the data to try and only get 2-bedroom apartments
+```
+```{r}
+ipums_train_2br <- ipums_train %>%
+  filter(RENT > 0) %>%
+  filter(BEDROOMS == 2) %>%
+  group_by(PUMA, STATEFIP) %>%
+  summarize(mean_rent = mean(RENT))
+ipums_map_2br <- ipums_shape_inner_join(ipums_train_2br, us_shape, by = c("PUMA", "STATEFIP"))
+ipums_aus_2br <- ipums_map_2br %>%
+  filter(str_detect(Name,"^Austin City"))
+# We won't bother with a map for this one, we can assume the above trends hold true
+# Instead, we'll just make a bar graph
+ggplot(data = ipums_aus_2br) +
+  geom_col(aes(x = Name,
+               y = mean_rent,
+               color = Name,
+               fill = Name)) +
+  scale_color_hue() +
+  labs(title = "Average 2-Bedroom Rent in Austin PUMAs", y = "Average Rent in Dollars", x = "PUMAs") +
+  theme(axis.text.x.bottom = element_blank())
+```
+```{r}
+# Alternatively, we can examine them via table, to make it easier to compare to fair-market estimations
+ipums_aus_2br %>%
+  select(mean_rent)
+fairdata %>%
+  filter(countyname == "Austin County") %>%
+  select(fmr_2)
+# There is at least a 150 dollar difference between the fair market rent in Austin
+# And the lowest average rent of a PUMA
+# However, that *is* an average, so we can instead try and find rents that fit under the FMR
+# We will also be using Gross Rent from here on out, rather than contract rent, as that's what FMR measures
+ipums_train_ausFMR <- ipums_train %>%
+  filter(RENTGRS > 0 & RENTGRS < 956) %>%
+  filter(BEDROOMS == 2) %>%
+  filter(STATEFIP == 48) %>%
+  filter(PUMA >= 5302 & PUMA <= 5308)
+count(ipums_train_ausFMR)
+# 80 Observations! And we can use the Household weight to see how representative these are
+ipums_train_ausFMR %>%
+  summarize(mean(HHWT))
+# The average weight of these observations comes out to be around 171, meaning
+# (according to IPUMS), that the average observation in this set represents 171 or so households across the US
+```
+

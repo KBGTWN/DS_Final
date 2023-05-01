@@ -45,5 +45,18 @@ docs/
 # translation temp files
 po/*~
 
+#Data files
+.xslx
+.zip
+.xml
+.dat
+.prj
+.CPG
+.dbf
+.sbn
+.sbx
+.shp
+.shx
+
 # RStudio Connect folder
 rsconnect/
