@@ -1,10 +1,12 @@
 ---
 title: "index"
-author: Thomas Adams
+author: "Thomas Adams & Keegan Brown"
 format: 
-  html: 
+  html:
     self-contained: true
 editor: visual
+editor_options: 
+  chunk_output_type: console
 ---
 
 #Stretch Exercise 7
@@ -55,6 +57,28 @@ ggplot(data = ipums_map, aes(fill = mean_rent)) +
   geom_sf() +
   scale_fill_gradient(low = "red", high = "green")
 ```
+
+Pulling vacancy info. 
+
+```{r}
+ddi_hier <- read_ipums_ddi("usa_00003.xml")
+data_vac <- read_ipums_micro(ddi_hier)
+
+data_vac%>%
+  ipums_val_labels(VACANCY)
+
+
+data_vac <- data_vac%>%
+  mutate(VACANCY = as.factor(VACANCY))
+
+data_vac%>%
+  select(VACANCY)%>%
+  group_by(VACANCY)%>%
+  sum()
+```
+
+
+
 ```{r}
 # This is a little cluttered, so we're going to focus on Texas specifically
 ipums_tex <- ipums_map %>%
@@ -68,6 +92,7 @@ ggplot(data = ipums_tex, aes(fill = mean_rent)) +
 # Particularly, rural border areas are relatively inexpensive, while cities are much higher in value
 # Not exactly surprising, but what if we narrow in on a particular area, like Austin?
 ```
+
 ```{r}
 ipums_aus <- ipums_tex %>%
   filter(str_detect(Name,"^Austin City"))
@@ -86,6 +111,7 @@ fairdata %>%
 # Based on the previous visualization, only a four-bedroom apartment approaches the average in any PUMA
 # Let's rework the data to try and only get 2-bedroom apartments
 ```
+
 ```{r}
 ipums_train_2br <- ipums_train %>%
   filter(RENT > 0) %>%
@@ -111,6 +137,7 @@ ggplot(data = ipums_aus_2br) +
   theme(axis.text.x.bottom = element_blank())
 
 ```
+
 ```{r}
 # Alternatively, we can examine them via table, to make it easier to compare to fair-market estimations
 ipums_aus_2br %>%
@@ -148,6 +175,7 @@ As for the models we'll be testing, those will be fleshed out in the following c
 We'll be designing models to predict classification problems. The classification we will look for is whether given information on a 2-bedroom apartment, such as location (State FIPS & PUMA), age of the building, poverty status of the inhabitant, and the inhabitants travel-time to work, and the population of a given county the PUMA falls in can provide enough statistical correlation to predict if an apartment is above or below the FMR for that county or area.
 
 Ergo, we'll need to design the outcome variable (a_FMR for above_FMR). We'll do this by county, as that's how the FMR data is set up, and try to limit it to one state, so that we can do it by county code, as well as limit the scope of the exercise. The state, for this purpose, will be Texas, because it offers a large sample size to work with.
+
 ```{r}
 ip_tex <- ipums_train %>%
   filter(RENT > 0) %>%
@@ -181,10 +209,7 @@ join_tex <- join_tex %>%
 
 The models we'll consider will be as follows:
 
-A logit-LASSO model, utilizing the lambda hyperparameter (which will be tuned for), as well as two important steps in its recipe:
-1. step_dummy() to turn the PUMA codes into dummy variables to consider individually across the dataset
-2. step_normalize(all_predictors()) to ensure our predictors are spread on a normal distribution for the LASSO model to interpret and subsequently reduce appropriately.
-We will additionally include step_corr(all_predictors()) to avoid collinearity problems that may exist in the model.
+A logit-LASSO model, utilizing the lambda hyperparameter (which will be tuned for), as well as two important steps in its recipe: 1. step_dummy() to turn the PUMA codes into dummy variables to consider individually across the dataset 2. step_normalize(all_predictors()) to ensure our predictors are spread on a normal distribution for the LASSO model to interpret and subsequently reduce appropriately. We will additionally include step_corr(all_predictors()) to avoid collinearity problems that may exist in the model.
 
 A random forest model, for which we'd also tune the mtry() hyperparameter using a regular tune_grid, from which we'd collect the best roc_auc to finalize the model with. This would use the above hyperparameters with the exception of step_normalize, which is not as important in a random forest model.
 
@@ -193,6 +218,7 @@ And a MARS model built for classification, which might allow for better understa
 The one we'll use for this exercise will be the logistic LASSO model.
 
 Now, we design the model:
+
 ```{r}
 # Start by making a penalty grid
 lasso_grid <- grid_regular(penalty(), levels = 50)
