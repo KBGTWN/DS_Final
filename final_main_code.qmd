@@ -25,6 +25,7 @@ library(tigris)
 library(parsnip)
 library(glmnet)
 library(patchwork)
+library(ranger)
 ```
 
 ###Data
@@ -110,7 +111,7 @@ data%>%
 data <- data %>%
   inner_join(data_vac, by = "PUMA")
 
-## casewhen filter for DC/ Baltimore to be included only under the proper conditions
+##filter for DC/ Baltimore to be included only under the proper conditions
 data <- data %>%
   group_by(STATEFIP) %>%
   filter(STATEFIP == 11 & COUNTYFIP == 1 | 
@@ -250,7 +251,6 @@ fairdata %>%
 
 ```
 
-
 #Final Prep of data 
 
 ## Overall 
@@ -284,9 +284,10 @@ join_tot <- join_tot %>%
 # Also setting our outcome to a factor, too, to use in our model
 join_tot <- join_tot %>%
   mutate(a_FMR_fac = as.factor(a_FMR))
-
+#Uncounting to take sample weight into account
+join_tot <- join_tot %>%
+  uncount(HHWT)
 ```
-
 
 ##DC
 
@@ -318,7 +319,7 @@ join_dc <- join_dc %>%
 join_dc <- join_dc %>%
   mutate(a_FMR_fac = as.factor(a_FMR))
 
-#Hweight reminder 
+#Uncounting
 join_dc <- join_dc %>%
   uncount(HHWT)
 ```
@@ -347,11 +348,14 @@ join_blt <- join_blt %>%
 join_blt <- join_blt %>%
   mutate(a_FMR_fac = as.factor(a_FMR))
 
+# Uncounting here to take sample weights into account
+join_blt <- join_blt %>%
+  uncount(HHWT)
 
 ```
 
 
-#Model Specs
+#Model Specs - Lasso 
 
 ##Overall
 
@@ -365,11 +369,11 @@ lasso_grid <- grid_regular(penalty(), levels = 50)
 tot_folds <- vfold_cv(data = join_tot, v = 10)
 # Making our recipe
 tot_rec <- 
-  recipe(a_FMR_fac ~ HHINCOME + PUMA + KITCHEN + BUILTYR2 + TRANTIME + POVERTY + pop2017, data = join_tot) %>%
-  step_dummy(PUMA) %>%
+  recipe(a_FMR_fac ~ HHINCOME + STATEFIP + PUMA_fac + KITCHEN + BUILTYR2 + TRANTIME + POVERTY + vac_ratio + pop2017, data = join_tot) %>%
+  step_dummy(all_factor_predictors()) %>%
   step_zv(all_predictors()) %>%
-  step_normalize(all_predictors()) %>%
-  step_corr(all_predictors())
+  step_normalize(all_numeric()) %>%
+  step_corr(all_numeric())
 
 # Making our Model
 tot_las <- logistic_reg(
@@ -382,7 +386,6 @@ tot_las <- logistic_reg(
 tot_wf <- workflow() %>%
   add_recipe(tot_rec) %>%
   add_model(tot_las)
-
 # Creating a function to get the coefficients from our resamples
 extractLm <- function(x) {
   x %>%
@@ -410,7 +413,7 @@ mean(tot_met$.estimate)
 # What about the best lambda?
 tot_cv %>%
   select_best("roc_auc")
-#It's fold1, model34. Let's go ahead and finalize our LASSO model
+
 tot_best <- tot_cv %>%
   select_best("roc_auc")
 
@@ -425,7 +428,6 @@ tot_pred <- predict(tot_final, join_tot, type = "class")
 # calculating precision and recall for our predictions
 precision_vec(join_tot$a_FMR_fac, tot_pred$.pred_class, "binary")
 recall_vec(join_tot$a_FMR_fac,tot_pred$.pred_class, "binary")
-
 ```
 
 
@@ -440,11 +442,11 @@ lasso_grid <- grid_regular(penalty(), levels = 50)
 DC_folds <- vfold_cv(data = join_dc, v = 10)
 # Making our recipe
 DC_rec <- 
-  recipe(a_FMR_fac ~ HHINCOME + PUMA + KITCHEN + BUILTYR2 + TRANTIME + POVERTY + pop2017, data = join_dc) %>%
-  step_dummy(PUMA) %>%
+  recipe(a_FMR_fac ~ HHINCOME + PUMA_fac + KITCHEN + BUILTYR2 + TRANTIME + POVERTY + vac_ratio + pop2017, data = join_tot) %>%
+  step_dummy(all_factor_predictors()) %>%
   step_zv(all_predictors()) %>%
-  step_normalize(all_predictors()) %>%
-  step_corr(all_predictors())
+  step_normalize(all_numeric()) %>%
+  step_corr(all_numeric())
 
 # Making our Model
 
@@ -503,17 +505,17 @@ precision_vec(join_dc$a_FMR_fac, DC_pred$.pred_class, "binary")
 recall_vec(join_dc$a_FMR_fac, DC_pred$.pred_class, "binary")
 ```
 
-
+##Baltimore
 
 ```{r}
 blt_folds <- vfold_cv(data = join_blt, v = 10)
 # Making our recipe
 blt_rec <- 
-  recipe(a_FMR_fac ~ HHINCOME + PUMA_fac + KITCHEN + BUILTYR2 + TRANTIME + POVERTY + pop2017, data = join_blt) %>%
-  step_dummy(PUMA_fac) %>%
+  recipe(a_FMR_fac ~ HHINCOME + PUMA_fac + KITCHEN + BUILTYR2 + TRANTIME + POVERTY + vac_ratio + pop2017, data = join_tot) %>%
+  step_dummy(all_factor_predictors()) %>%
   step_zv(all_predictors()) %>%
-  step_normalize(all_predictors()) %>%
-  step_corr(all_predictors())
+  step_normalize(all_numeric()) %>%
+  step_corr(all_numeric())
 
 # Making our Model
 
@@ -568,7 +570,28 @@ recall_vec(join_blt$a_FMR_fac, blt_pred$.pred_class, "binary")
 
 Both of these models offer satisfying precision and recall rates, at roughly low-to-mid 80%s in both categories. We will now try them with the testing data. In order to do this, the testing data has to be cleaned in roughly the same way.
 
+##cleaning for test comparison
+
 ```{r}
+join_tot_test <- left_join(x = ipums_test_tot, y = fmr_tot, by = "COUNTYFIP")
+
+join_tot_test <- join_tot_test %>%
+  mutate(
+    a_FMR = case_when(
+      RENTGRS > fmr_2 ~ 1,
+      RENTGRS <= fmr_2 ~ 0
+    )
+  )
+
+join_tot_test <- join_tot_test %>%
+  mutate(PUMA_fac = as.factor(PUMA))
+
+join_tot_test <- join_tot_test %>%
+  mutate(a_FMR_fac = as.factor(a_FMR))
+
+join_tot_test <- join_tot_test %>%
+  uncount(HHWT)
+
 join_blt_test <- left_join(x = ipums_test_blt, y = FMR_blt, by = "COUNTYFIP")
 
 join_blt_test <- join_blt_test %>%
@@ -590,7 +613,7 @@ join_blt_test <- join_blt_test %>%
 
 
 
-join_dc_test <- left_join(x = ipums_test_DC, y = FMR_DC, by = "COUNTYFIP")
+join_dc_test <- left_join(x = ipums_test_dc, y = FMR_DC, by = "COUNTYFIP")
 
 join_dc_test <- join_dc_test %>%
   mutate(
@@ -612,9 +635,15 @@ join_dc_test <- join_dc_test %>%
   uncount(HHWT)
 ```
 
+### Test and eval 
 Now we'll get predictions from our finalized models for the testing data and see what happens.
 
 ```{r}
+tot_pred_test <- predict(tot_final, join_tot_test, type = "class")
+
+precision_vec(join_tot_test$a_FMR_fac, tot_pred_test$.pred_class, "binary")
+recall_vec(join_tot_test$a_FMR_fac, tot_pred_test$.pred_class, "binary")
+
 DC_pred_test <- predict(DC_final, join_dc_test, type = "class")
 
 precision_vec(join_dc_test$a_FMR_fac, DC_pred_test$.pred_class, "binary")
@@ -628,4 +657,55 @@ recall_vec(join_blt_test$a_FMR_fac, blt_pred_test$.pred_class, "binary")
 
 Precision and recall still hover in that range for DC, but Baltimore has a much lower precision, as 69%, and a much higher recall, at 89%, meaning the model is slightly less accurate for that area.
 
-\*\*KB geography coefficent can capture the issues of measurement between the two places. But combining them together is kb: use caseweights https://www.tidyverse.org/blog/2022/05/case-weights/
+#Model Spec- RF
+
+```{r}
+
+##Setting up cv 
+tot_folds <- vfold_cv(data = join_tot, v = 10)
+
+## setting up recipe 
+rf_rec <-
+  recipe(a_FMR_fac ~ HHINCOME + PUMA_fac + KITCHEN + BUILTYR2 + TRANTIME + POVERTY + pop2017 + vac_ratio, data = join_tot)%>%
+  step_dummy(all_factor_predictors(), -all_outcomes())%>%
+  step_normalize(all_double_predictors())%>%
+  step_normalize(vac_ratio)
+  
+prep(rf_rec)
+
+## setting up model spec
+## this section is for sample only, obviously 10 trees is pretty low. 
+
+tune_spec <- rand_forest(
+  min_n = 2,
+  trees = 10,
+  mtry = tune()
+) %>%
+  set_engine("ranger")%>%
+ set_mode("classification")
+
+## setting up workflow 
+tune_wf <- workflow() %>%
+  add_recipe(rf_rec) %>%
+  add_model(tune_spec)
+
+## implementing WF
+tune_res <- tune_grid(
+  tune_wf,
+  resamples = tot_folds,
+  grid = 20
+)
+
+tune_res
+
+
+tune_res %>%
+  collect_metrics() %>%
+  filter(.metric == "roc_auc") %>%
+  ggplot(aes(x = mtry, y = .estimate)) +
+  geom_point(show.legend = FALSE) +
+  labs(x = NULL, y = "AUC")
+
+```
+
+
