@@ -45,7 +45,7 @@ docs/
 # translation temp files
 po/*~
 
-#Data files
+# Data files
 .xslx
 .zip
 .xml
