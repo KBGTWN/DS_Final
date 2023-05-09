@@ -40,9 +40,6 @@ data <- read_ipums_micro(ddi)
 #HUD FMH data - 
 fairdata <- read_xlsx("FMR2021.xlsx")
 
-# Performing some cleaning to select only variables of interest, as well as group the PUMAs to avoid a massive dataframe
-
-
 ```
 
 ###Pulling Vacancy Variable from hierarchical file
@@ -79,14 +76,13 @@ data_vac <- data_vac %>%
 ###Preprocessing/Split
 
 ```{r}
-### note for TJ: this is the factorized and preprocessing i thought was needed based on the lasso you built. 
 
 #below are all variables used in mutation and eval, pared down from all variables due to computational limits. 
 
 data <- data%>%
   select(RENT, STATEFIP, HHWT, PUMA, BEDROOMS, RENTGRS, COUNTYFIP, TRANTIME, POVERTY, BUILTYR2, KITCHEN, HHINCOME)
 
-## i think some of the above have to be calculated as factors too - might impact the model
+##Mutating required variables into factor variables for EDA and model implementation
 
 data <- data%>%
   mutate(STATEFIP = as.factor(STATEFIP),
@@ -96,28 +92,45 @@ data <- data%>%
          COUNTYFIP = as.factor(COUNTYFIP))
 
 data <- data %>%
-  filter(RENT > 0)%>%
   group_by(PUMA, STATEFIP)%>%
   mutate(mean_rent = mean(RENT))%>%
   ungroup()
 
+data <- data%>%
+  group_by(STATEFIP)%>%
+  filter(STATEFIP == 11 || STATEFIP == 24)%>%
+  ungroup()
+
+##proof of STATEFIP filter 
+data%>%
+  group_by(STATEFIP)%>%
+  summarise(n=n())
+
 ## Joining the vacancy variable 
 data <- data %>%
   inner_join(data_vac, by = "PUMA")
-  
 
-## DC Data 
+## casewhen filter for DC/ Baltimore to be included only under the proper conditions
+data <- data %>%
+  group_by(STATEFIP) %>%
+  filter(STATEFIP == 11 & COUNTYFIP == 1 | 
+         STATEFIP == 24 & COUNTYFIP %in% c(3, 5, 13, 25, 27, 35, 510)) %>%
+  ungroup()
+
+## final filters to align with the rest of the dataset 
+data <- data%>%
+  filter(RENT > 0)%>%
+  filter(BEDROOMS == 2)
+
+## DC Data only
 ip_DC <- data %>%
-  filter(RENT > 0) %>%
   filter(STATEFIP == 11) %>%
   zap_labels(COUNTYFIP) %>%
   filter(COUNTYFIP == 1) %>%
   filter(BEDROOMS == 2)
 
-##Baltimore data 
-
+##Baltimore data only 
 ip_BLT <- data %>%
-  filter(RENT > 0) %>%
   filter(STATEFIP == 24) %>%
   zap_labels(COUNTYFIP) %>%
   filter(COUNTYFIP == c(3,5,13,25,27,35,510)) %>%
@@ -125,10 +138,14 @@ ip_BLT <- data %>%
 
 ```
 
-###split
+###split - 3 ways
 
 ```{r}
 set.seed(4262023)
+
+split <- initial_split(data, prop = .8)
+ipums_train_tot <- training (x = split)
+ipums_test_tot <- testing(x=split)
 
 ##DC split 
 split_dc <- initial_split(ip_DC, prop = .8)
@@ -140,6 +157,7 @@ ipums_test_dc <- testing(x = split_dc)
 split_blt <- initial_split(ip_BLT, prop = .8)
 ipums_train_blt <- training(x = split_blt)
 ipums_test_blt <- testing(x = split_blt)
+
 
 ## also lmiting the shapefile to just maryland and dc
 
@@ -218,6 +236,7 @@ ggplot(data = ip_DC, aes(x = vac_ratio, y = mean_rent)) +
 
 # Alternatively, we can examine them via table, to make it easier to compare to fair-market estimations
 
+
 ## this needs to be fixed and maybe use rentgrs first 
 ip_BLT %>%
   select(mean_rent)
@@ -231,21 +250,48 @@ fairdata %>%
 
 ```
 
-###EDA Continued
+
+#Final Prep of data 
+
+## Overall 
 
 ```{r}
-# Alternatively, we can examine them via table, to make it easier to compare to fair-market estimations
+## filtering FMR data to only the dc and boston areas of consideration
+fmr_tot <- fairdata%>%
+    rename(COUNTYFIP = county)%>%
+    filter(state == 11 & COUNTYFIP == 1 | 
+         state == 24 & COUNTYFIP %in% c(3, 5, 13, 25, 27, 35, 510))
 
-# There is at least a 150 dollar difference between the fair market rent in Austin
-# And the lowest average rent of a PUMA
-# However, that *is* an average, so we can instead try and find rents that fit under the FMR
-# We will also be using Gross Rent from here on out, rather than contract rent, as that's what FMR measures
+## ensuring countyfip is a factor so it can connect with the ipums_train data
+fmr_tot <- fmr_tot%>%
+  mutate(COUNTYFIP = as.factor(COUNTYFIP))
+
+## join
+join_tot <- left_join(x= ipums_train_tot, y=fmr_tot, by = "COUNTYFIP")
+
+
+#fmr eval class 
+join_tot <- join_tot %>%
+  mutate(
+    a_FMR = case_when(
+      RENTGRS > fmr_2 ~ 1,
+      RENTGRS <= fmr_2 ~ 0
+    )
+  )
+
+join_tot <- join_tot %>%
+  mutate(PUMA_fac = as.factor(PUMA))
+# Also setting our outcome to a factor, too, to use in our model
+join_tot <- join_tot %>%
+  mutate(a_FMR_fac = as.factor(a_FMR))
 
 ```
 
-#Final data prep for dc
+
+##DC
 
 ```{r}
+
 FMR_DC <- fairdata %>%
   filter(state == 11) %>%
   rename(COUNTYFIP = county)
@@ -266,17 +312,124 @@ join_dc <- join_dc %>%
 # We'll convert our PUMAs to factors to turn them into dummies for our model
 # Importantly, this will lose the geographic identification code for the PUMA
 # But, we'll make it a new column so the observation can still be associated with an area
-joindcC <- join_dc %>%
+join_dc <- join_dc %>%
   mutate(PUMA_fac = as.factor(PUMA))
 # Also setting our outcome to a factor, too, to use in our model
 join_dc <- join_dc %>%
   mutate(a_FMR_fac = as.factor(a_FMR))
-# Uncounting the HHWT to get a representative sample
+
+#Hweight reminder 
 join_dc <- join_dc %>%
   uncount(HHWT)
 ```
 
-#Model Spec - DC
+##Baltimore
+
+```{r}
+FMR_blt <- fairdata %>%
+  filter(state == 24) %>%
+  rename(COUNTYFIP = county)%>%
+  mutate(COUNTYFIP = as.factor(COUNTYFIP))
+
+join_blt <- left_join(x = ipums_train_blt, y = FMR_blt, by = "COUNTYFIP")
+
+join_blt <- join_blt %>%
+  mutate(
+    a_FMR = case_when(
+      RENTGRS > fmr_2 ~ 1,
+      RENTGRS <= fmr_2 ~ 0
+    )
+  )
+
+join_blt <- join_blt %>%
+  mutate(PUMA_fac = as.factor(PUMA))
+# Also setting our outcome to a factor, too, to use in our model
+join_blt <- join_blt %>%
+  mutate(a_FMR_fac = as.factor(a_FMR))
+
+
+```
+
+
+#Model Specs
+
+##Overall
+
+```{r}
+
+# Start by making a penalty grid
+lasso_grid <- grid_regular(penalty(), levels = 50)
+# Folds for model selection
+# Using our joined table up there.
+# We'll clean up our testing data appropriately to apply this model, too
+tot_folds <- vfold_cv(data = join_tot, v = 10)
+# Making our recipe
+tot_rec <- 
+  recipe(a_FMR_fac ~ HHINCOME + PUMA + KITCHEN + BUILTYR2 + TRANTIME + POVERTY + pop2017, data = join_tot) %>%
+  step_dummy(PUMA) %>%
+  step_zv(all_predictors()) %>%
+  step_normalize(all_predictors()) %>%
+  step_corr(all_predictors())
+
+# Making our Model
+tot_las <- logistic_reg(
+  penalty = tune(),
+  mixture = 1
+) %>%
+  set_engine("glmnet")
+# Making our workflow
+
+tot_wf <- workflow() %>%
+  add_recipe(tot_rec) %>%
+  add_model(tot_las)
+
+# Creating a function to get the coefficients from our resamples
+extractLm <- function(x) {
+  x %>%
+    extract_fit_engine() %>% 
+    tidy()
+}
+tot_ctrl <- control_grid(extract = extractLm)
+
+# Tuning our LASSO model
+tot_cv <- tot_wf %>%
+  tune_grid(
+    resamples = tot_folds,
+    grid = lasso_grid,
+    control = tot_ctrl
+  )
+
+# Pulling the roc_auc for this model
+tot_met<- collect_metrics(tot_cv, summarize = FALSE)
+
+tot_met<- collect_metrics(tot_cv, summarize = FALSE) %>%
+  filter(.metric == "roc_auc")
+
+# Checking the average roc_auc
+mean(tot_met$.estimate)
+# What about the best lambda?
+tot_cv %>%
+  select_best("roc_auc")
+#It's fold1, model34. Let's go ahead and finalize our LASSO model
+tot_best <- tot_cv %>%
+  select_best("roc_auc")
+
+tot_final <- finalize_workflow(
+  tot_wf,
+  parameters = tot_best
+) %>%
+  fit(join_tot)
+
+# Getting our predictions
+tot_pred <- predict(tot_final, join_tot, type = "class")
+# calculating precision and recall for our predictions
+precision_vec(join_tot$a_FMR_fac, tot_pred$.pred_class, "binary")
+recall_vec(join_tot$a_FMR_fac,tot_pred$.pred_class, "binary")
+
+```
+
+
+##DC
 
 ```{r}
 # Start by making a penalty grid
@@ -350,33 +503,7 @@ precision_vec(join_dc$a_FMR_fac, DC_pred$.pred_class, "binary")
 recall_vec(join_dc$a_FMR_fac, DC_pred$.pred_class, "binary")
 ```
 
-# Running through the same steps for Baltimore
 
-```{r}
-FMR_blt <- fairdata %>%
-  filter(state == 24) %>%
-  rename(COUNTYFIP = county)%>%
-  mutate(COUNTYFIP = as.factor(COUNTYFIP))
-
-join_blt <- left_join(x = ipums_train_blt, y = FMR_blt, by = "COUNTYFIP")
-
-join_blt <- join_blt %>%
-  mutate(
-    a_FMR = case_when(
-      RENTGRS > fmr_2 ~ 1,
-      RENTGRS <= fmr_2 ~ 0
-    )
-  )
-
-join_blt <- join_blt %>%
-  mutate(PUMA_fac = as.factor(PUMA))
-# Also setting our outcome to a factor, too, to use in our model
-join_blt <- join_blt %>%
-  mutate(a_FMR_fac = as.factor(a_FMR))
-# Uncounting the HHWT to get a representative sample
-join_blt <- join_blt %>%
-  uncount(HHWT)
-```
 
 ```{r}
 blt_folds <- vfold_cv(data = join_blt, v = 10)
@@ -501,5 +628,4 @@ recall_vec(join_blt_test$a_FMR_fac, blt_pred_test$.pred_class, "binary")
 
 Precision and recall still hover in that range for DC, but Baltimore has a much lower precision, as 69%, and a much higher recall, at 89%, meaning the model is slightly less accurate for that area.
 
-**KB geography coefficent can capture the issues of measurement between the two places. But combining them together is 
-kb: use caseweights https://www.tidyverse.org/blog/2022/05/case-weights/
+\*\*KB geography coefficent can capture the issues of measurement between the two places. But combining them together is kb: use caseweights https://www.tidyverse.org/blog/2022/05/case-weights/
