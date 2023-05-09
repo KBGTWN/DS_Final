@@ -61,20 +61,38 @@ ggplot(data = ipums_map, aes(fill = mean_rent)) +
 Pulling vacancy info. 
 
 ```{r}
+
+##this is the hierarchical data to use that allows us to collect the vacancy proprtions
 ddi_hier <- read_ipums_ddi("usa_00003.xml")
 data_vac <- read_ipums_micro(ddi_hier)
 
+#view of the vacancy piece 
 data_vac%>%
   ipums_val_labels(VACANCY)
 
+#pulling only data needed to the dataframe 
+data_vac <- data_vac%>%
+  select(HHWT, PUMA, VACANCY)
 
+##changing vacancy to categorical 
 data_vac <- data_vac%>%
   mutate(VACANCY = as.factor(VACANCY))
 
+##viewing our vacancy counts, note the high count of n/a is due to hierarchical file loading format, not "real" N/A
 data_vac%>%
-  select(VACANCY)%>%
   group_by(VACANCY)%>%
-  sum()
+  summarise(n=n())
+
+# we are filtering for vacancy on 1, 3 because the other vacancy types are not reflective of rental housing supply. 
+data_vac <- data_vac %>%
+  group_by(PUMA) %>%
+  summarize(vac_ratio = sum(VACANCY %in% c(1, 3)) / n()) 
+
+
+  
+
+
+
 ```
 
 
