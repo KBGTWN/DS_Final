@@ -247,12 +247,16 @@ fairdata %>%
 
 ```{r}
 FMR_DC <- fairdata %>%
-  filter(State == 11) %>%
+  filter(state == 11) %>%
   rename(COUNTYFIP = county)
 
-join_DC <- left_join(x = ip_train_DC, y = FMR_DC, by = "COUNTYFIP")
+FMR_DC <- FMR_DC%>%
+  mutate(COUNTYFIP = as.factor(COUNTYFIP))
+  
 
-join_DC <- join_DC %>%
+join_dc <- left_join(x = ipums_train_dc, y = FMR_DC, by = "COUNTYFIP")
+
+join_dc <- join_dc %>%
   mutate(
     a_FMR = case_when(
       RENTGRS > fmr_2 ~ 1,
@@ -262,13 +266,13 @@ join_DC <- join_DC %>%
 # We'll convert our PUMAs to factors to turn them into dummies for our model
 # Importantly, this will lose the geographic identification code for the PUMA
 # But, we'll make it a new column so the observation can still be associated with an area
-join_DC <- join_DC %>%
+joindcC <- join_dc %>%
   mutate(PUMA_fac = as.factor(PUMA))
 # Also setting our outcome to a factor, too, to use in our model
-join_DC <- join_DC %>%
+join_dc <- join_dc %>%
   mutate(a_FMR_fac = as.factor(a_FMR))
 # Uncounting the HHWT to get a representative sample
-join_DC <- join_DC %>%
+join_dc <- join_dc %>%
   uncount(HHWT)
 ```
 
@@ -280,11 +284,11 @@ lasso_grid <- grid_regular(penalty(), levels = 50)
 # Folds for model selection
 # Using our joined table up there.
 # We'll clean up our testing data appropriately to apply this model, too
-DC_folds <- vfold_cv(data = join_DC, v = 10)
+DC_folds <- vfold_cv(data = join_dc, v = 10)
 # Making our recipe
 DC_rec <- 
-  recipe(a_FMR_fac ~ HHINCOME + PUMA_fac + KITCHEN + BUILTYR2 + TRANTIME + POVERTY + pop2017, data = join_DC) %>%
-  step_dummy(PUMA_fac) %>%
+  recipe(a_FMR_fac ~ HHINCOME + PUMA + KITCHEN + BUILTYR2 + TRANTIME + POVERTY + pop2017, data = join_dc) %>%
+  step_dummy(PUMA) %>%
   step_zv(all_predictors()) %>%
   step_normalize(all_predictors()) %>%
   step_corr(all_predictors())
@@ -337,13 +341,13 @@ DC_final <- finalize_workflow(
   DC_wf,
   parameters = DC_best
 ) %>%
-  fit(join_DC)
+  fit(join_dc)
 
 # Getting our predictions
-DC_pred <- predict(DC_final, join_DC, type = "class")
+DC_pred <- predict(DC_final, join_dc, type = "class")
 # calculating precision and recall for our predictions
-precision_vec(join_DC$a_FMR_fac, DC_pred$.pred_class, "binary")
-recall_vec(join_DC$a_FMR_fac, DC_pred$.pred_class, "binary")
+precision_vec(join_dc$a_FMR_fac, DC_pred$.pred_class, "binary")
+recall_vec(join_dc$a_FMR_fac, DC_pred$.pred_class, "binary")
 ```
 
 # Running through the same steps for Baltimore
@@ -351,9 +355,10 @@ recall_vec(join_DC$a_FMR_fac, DC_pred$.pred_class, "binary")
 ```{r}
 FMR_blt <- fairdata %>%
   filter(state == 24) %>%
-  rename(COUNTYFIP = county)
+  rename(COUNTYFIP = county)%>%
+  mutate(COUNTYFIP = as.factor(COUNTYFIP))
 
-join_blt <- left_join(x = ip_train_blt, y = FMR_blt, by = "COUNTYFIP")
+join_blt <- left_join(x = ipums_train_blt, y = FMR_blt, by = "COUNTYFIP")
 
 join_blt <- join_blt %>%
   mutate(
@@ -437,7 +442,7 @@ recall_vec(join_blt$a_FMR_fac, blt_pred$.pred_class, "binary")
 Both of these models offer satisfying precision and recall rates, at roughly low-to-mid 80%s in both categories. We will now try them with the testing data. In order to do this, the testing data has to be cleaned in roughly the same way.
 
 ```{r}
-join_blt_test <- left_join(x = ip_test_blt, y = FMR_blt, by = "COUNTYFIP")
+join_blt_test <- left_join(x = ipums_test_blt, y = FMR_blt, by = "COUNTYFIP")
 
 join_blt_test <- join_blt_test %>%
   mutate(
@@ -458,9 +463,9 @@ join_blt_test <- join_blt_test %>%
 
 
 
-join_DC_test <- left_join(x = ip_test_DC, y = FMR_DC, by = "COUNTYFIP")
+join_dc_test <- left_join(x = ipums_test_DC, y = FMR_DC, by = "COUNTYFIP")
 
-join_DC_test <- join_DC_test %>%
+join_dc_test <- join_dc_test %>%
   mutate(
     a_FMR = case_when(
       RENTGRS > fmr_2 ~ 1,
@@ -470,23 +475,23 @@ join_DC_test <- join_DC_test %>%
 # We'll convert our PUMAs to factors to turn them into dummies for our model
 # Importantly, this will lose the geographic identification code for the PUMA
 # But, we'll make it a new column so the observation can still be associated with an area
-join_DC_test <- join_DC_test %>%
+join_dc_test <- join_dc_test %>%
   mutate(PUMA_fac = as.factor(PUMA))
 # Also setting our outcome to a factor, too, to use in our model
-join_DC_test <- join_DC_test %>%
+join_dc_test <- join_dc_test %>%
   mutate(a_FMR_fac = as.factor(a_FMR))
 # Uncounting the HHWT to get a representative sample
-join_DC_test <- join_DC_test %>%
+join_dc_test <- join_dc_test %>%
   uncount(HHWT)
 ```
 
 Now we'll get predictions from our finalized models for the testing data and see what happens.
 
 ```{r}
-DC_pred_test <- predict(DC_final, join_DC_test, type = "class")
+DC_pred_test <- predict(DC_final, join_dc_test, type = "class")
 
-precision_vec(join_DC_test$a_FMR_fac, DC_pred_test$.pred_class, "binary")
-recall_vec(join_DC_test$a_FMR_fac, DC_pred_test$.pred_class, "binary")
+precision_vec(join_dc_test$a_FMR_fac, DC_pred_test$.pred_class, "binary")
+recall_vec(join_dc_test$a_FMR_fac, DC_pred_test$.pred_class, "binary")
 
 blt_pred_test <- predict(blt_final, join_blt_test, type = "class")
 
@@ -495,3 +500,6 @@ recall_vec(join_blt_test$a_FMR_fac, blt_pred_test$.pred_class, "binary")
 ```
 
 Precision and recall still hover in that range for DC, but Baltimore has a much lower precision, as 69%, and a much higher recall, at 89%, meaning the model is slightly less accurate for that area.
+
+**KB geography coefficent can capture the issues of measurement between the two places. But combining them together is 
+kb: use caseweights https://www.tidyverse.org/blog/2022/05/case-weights/
