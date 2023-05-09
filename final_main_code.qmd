@@ -8,12 +8,12 @@ editor: visual
 editor_options: 
   chunk_output_type: console
 ---
-#Project Overview 
 
+#Project Overview
 
 #Loading Data, Libraries, and EDA
 
-###libraries 
+###libraries
 
 ```{r}
 library(tidyverse)
@@ -28,6 +28,7 @@ library(patchwork)
 ```
 
 ###Data
+
 ```{r}
 us_shape <- read_ipums_sf("ipums_puma_2010")
 
@@ -41,7 +42,8 @@ fairdata <- read_xlsx("FMR2021.xlsx")
 
 ```
 
-###Pulling Vacancy Variable from hirearchical file 
+###Pulling Vacancy Variable from hierarchical file
+
 ```{r}
 ##this is the hierarchical data to use that allows us to collect the vacancy proprtions
 ddi_hier <- read_ipums_ddi("usa_00003.xml")
@@ -71,13 +73,15 @@ data_vac <- data_vac %>%
 
 ```
 
-###Preprocessing/Split 
+###Preprocessing/Split
 
 ```{r}
 ### note for TJ: this is the factorized and preprocessing i thought was needed based on the lasso you built. 
 
-data<- data%>%
-  select(RENT, HHWT, PUMA, BEDROOMS, RENTGRS, COUNTYFIP, TRANTIME, POVERTY, BUILTYR2,
+#below are all variables used in mutation and eval, pared down from all variables due to computational limits. 
+
+data <- data%>%
+  select(RENT, STATEFIP, HHWT, PUMA, BEDROOMS, RENTGRS, COUNTYFIP, TRANTIME, POVERTY, BUILTYR2,
          KITCHEN, HHINCOME)
 
 ## i think some of the above have to be calculated as factors too - might impact the model
@@ -89,30 +93,72 @@ data <- data%>%
          BEDROOMS = as.factor(BEDROOMS),
          COUNTYFIP = as.factor(COUNTYFIP))
 
+data <- data %>%
+  filter(RENT > 0)%>%
+  group_by(PUMA, STATEFIP)%>%
+  mutate(mean_rent = mean(RENT))%>%
+  ungroup()
+
+## Joining the vacancy variable 
+data <- data %>%
+  inner_join(data_vac, by = "PUMA")
+  
+
+## DC Data 
+ip_DC <- data %>%
+  filter(RENT > 0) %>%
+  filter(STATEFIP == 11) %>%
+  zap_labels(COUNTYFIP) %>%
+  filter(COUNTYFIP > 0) %>%
+  filter(BEDROOMS == 2)
+
+##Baltimore data 
+
+ip_MD <- ipums_train %>%
+  filter(RENT > 0) %>%
+  filter(STATEFIP == 24) %>%
+  zap_labels(COUNTYFIP) %>%
+  filter(COUNTYFIP == c(3,5,13,25,27,35,510)) %>%
+  filter(BEDROOMS == 2)
+
 ```
 
+###split
 
 ```{r}
 set.seed(4262023)
 
-split <- initial_split(data, prop = .8)
-ipums_train <- training(x = split)
-ipums_test <- testing(x = split)
+##DC split 
+split_dc <- initial_split(ip_DC, prop = .8)
+ipums_train_dc <- training(x = split_dc)
+ipums_test_dc <- testing(x = split_dc)
+
+##Balt split 
+
+split_blt <- initial_split(ip_BLT, prop = .8)
+ipums_train_blt <- training(x = split_blt)
+ipums_test_blt <- testing(x = split_blt)
+
+## also lmiting the shapefile to just maryland and dc
+
+us_shape <- us_shape %>%
+  group_by(State) %>%
+  filter(State %in% c("Maryland", "District of Columbia")) %>%
+  ungroup()
+
+
 ```
 
 #EDA
+
 ```{r}
 
-ipums_train <- ipums_train %>%
-  filter(RENT > 0) %>%
-  group_by(PUMA, STATEFIP) %>%
-  summarize(mean_rent = mean(RENT))
+## Baltimore geospatial 
+
+
 
 ipums_map <- ipums_shape_inner_join(ipums_train2, us_shape, by = c("PUMA", "STATEFIP"))
 
-ipums_map <- ipums_map %>%
-  filter(State != "Alaska") %>%
-  filter(State != "Hawaii")
 
 # Examining the geographic characteristics of the data
 
@@ -147,6 +193,7 @@ ggplot(data = ipums_aus_2br) +
 ```
 
 ###EDA Continued
+
 ```{r}
 # Alternatively, we can examine them via table, to make it easier to compare to fair-market estimations
 ipums_aus_2br %>%
@@ -177,8 +224,8 @@ ipums_train_ausFMR %>%
 # (according to IPUMS), that the average observation in this set represents 171 or so households across the US
 ```
 
-
 #Final data prep
+
 ```{r}
 ip_tex <- ipums_train %>%
   filter(RENT > 0) %>%
@@ -210,8 +257,8 @@ join_tex <- join_tex %>%
   mutate(a_FMR_fac = as.factor(a_FMR))
 ```
 
+#Model Spec
 
-#Model Spec 
 ```{r}
 # Start by making a penalty grid
 lasso_grid <- grid_regular(penalty(), levels = 50)
@@ -282,4 +329,3 @@ las_tex_pred <- predict(lasso_final, join_tex, type = "class")
 precision_vec(join_tex$a_FMR_fac, las_tex_pred$.pred_class, "binary")
 recall_vec(join_tex$a_FMR_fac, las_tex_pred$.pred_class, "binary")
 ```
-
