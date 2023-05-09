@@ -30,11 +30,14 @@ library(patchwork)
 ###Data
 
 ```{r}
+#Shapefile
 us_shape <- read_ipums_sf("ipums_puma_2010")
 
+#IPUMS 2021 1year ACS extract/ddi
 ddi <- read_ipums_ddi("usa_00002.xml")
 data <- read_ipums_micro(ddi)
 
+#HUD FMH data - 
 fairdata <- read_xlsx("FMR2021.xlsx")
 
 # Performing some cleaning to select only variables of interest, as well as group the PUMAs to avoid a massive dataframe
@@ -111,7 +114,7 @@ ip_DC <- data %>%
   filter(COUNTYFIP == 1) %>%
   filter(BEDROOMS == 2)
 
-s##Baltimore data 
+##Baltimore data 
 
 ip_BLT <- data %>%
   filter(RENT > 0) %>%
@@ -144,7 +147,6 @@ us_shape <- us_shape %>%
   group_by(State) %>%
   filter(State %in% c("Maryland", "District of Columbia")) %>%
   ungroup()
-
 
 ```
 
@@ -225,7 +227,7 @@ fairdata %>%
 
 ### this needs to be fixed. 
 
-##in Baltimore and in DC, the difference between fair market rent by PUMA ranges between [x], [y] respectively. 
+##in Baltimore and in DC, the difference between fair market rent by PUMA ranges between [x], [y] respectively.  - maybe one where size = density? 
 
 ```
 
@@ -241,17 +243,16 @@ fairdata %>%
 
 ```
 
-#Final data prep Cut?
+#Final data prep for dc
 
 ```{r}
-
-fmr_md <- fairdata %>%
-  filter(state == 11) %>%
+FMR_DC <- fairdata %>%
+  filter(State == 11) %>%
   rename(COUNTYFIP = county)
 
-join_tex <- left_join(x = ip_tex, y = FMR_tex, by = "COUNTYFIP")
+join_DC <- left_join(x = ip_train_DC, y = FMR_DC, by = "COUNTYFIP")
 
-join_tex <- join_tex %>%
+join_DC <- join_DC %>%
   mutate(
     a_FMR = case_when(
       RENTGRS > fmr_2 ~ 1,
@@ -261,14 +262,17 @@ join_tex <- join_tex %>%
 # We'll convert our PUMAs to factors to turn them into dummies for our model
 # Importantly, this will lose the geographic identification code for the PUMA
 # But, we'll make it a new column so the observation can still be associated with an area
-join_tex <- join_tex %>%
+join_DC <- join_DC %>%
   mutate(PUMA_fac = as.factor(PUMA))
 # Also setting our outcome to a factor, too, to use in our model
-join_tex <- join_tex %>%
+join_DC <- join_DC %>%
   mutate(a_FMR_fac = as.factor(a_FMR))
+# Uncounting the HHWT to get a representative sample
+join_DC <- join_DC %>%
+  uncount(HHWT)
 ```
 
-#Model Spec
+#Model Spec - DC
 
 ```{r}
 # Start by making a penalty grid
