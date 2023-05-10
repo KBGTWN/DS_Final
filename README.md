@@ -3,6 +3,7 @@
 Authors: Thomas Adams & Keegan Brown
 Submission Date: 05/10/23
 
+Github Page link: https://kbgtwn.github.io/
 
 
 Files used for data analysis are too large to store on the repo. To recreate the files from IPUMS, visit the following website and select the following variables. Note, these must be pulled twice. One in a standard format, and one in the hierarchical format. Hierarchical is required for the vacancy rate by puma analysis in the EDA section of the .qmd. 
