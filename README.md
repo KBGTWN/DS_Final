@@ -4,9 +4,14 @@ Authors: Thomas Adams & Keegan Brown
 Submission Date: 05/10/23
 
 
+
 Files used for data analysis are too large to store on the repo. To recreate the files from IPUMS, visit the following website and select the following variables. Note, these must be pulled twice. One in a standard format, and one in the hierarchical format. Hierarchical is required for the vacancy rate by puma analysis in the EDA section of the .qmd. 
 
 ##IPUMS: https://usa.ipums.org/usa-action/variables/group
+
+Data source citation: 
+
+Steven Ruggles, Sarah Flood, Matthew Sobek, Danika Brockman, Grace Cooper,  Stephanie Richards, and Megan Schouweiler. IPUMS USA: Version 13.0 [dataset]. Minneapolis, MN: IPUMS, 2023. https://doi.org/10.18128/D010.V13.0
 
 ##Variables:
 
