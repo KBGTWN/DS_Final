@@ -47,6 +47,9 @@ From 2021 ACS - 1-year
 - Data quality flags
 
 
+Fair market housing data pulled from the following link for county level: 
+https://www.huduser.gov/portal/datasets/fmr.html#2021_data 
+
 
 
 
