@@ -671,7 +671,11 @@ recall_vec(join_blt_test$a_FMR_fac, blt_pred_test$.pred_class, "binary")
 
 Precision and recall still hover in that range for DC, but Baltimore has a much lower precision, as 69%, and a much higher recall, at 89%, meaning the model is slightly less accurate for that area.
 
+Our model with the combined dataset has even better results, with a precision rate of 87.6% and a recall of 83.3%. 
+
 #Model Spec- RF
+
+From this poiunt on, there is an example of running the rf model for the sake of the stretch ex - per discussion with Prof. Williams. Above is model of choice. 
 
 ```{r}
 
@@ -787,6 +791,9 @@ optimal_rf
 
 ##It appears that our optimal model with this seed is 10 candidate variables and 5 minimum observations.
 
-predictions <- predict(optimal_rf, join_tot_test)
+predictions <- predict(object = optimal_rf, new_data = join_tot_test, type = "class" )
+
 
 ```
+
+
