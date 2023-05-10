@@ -26,13 +26,14 @@ library(parsnip)
 library(glmnet)
 library(patchwork)
 library(ranger)
+
 ```
 
 ###Data
 
 ```{r}
 #Shapefile
-us_shape <- read_ipums_sf("ipums_puma_2010")
+us_shape <- read_ipums_sf("C:/Users/tj/OneDrive/Desktop/dataproj/dataproj/DS_Final/ipums_puma_2010")
 
 #IPUMS 2021 1year ACS extract/ddi
 ddi <- read_ipums_ddi("usa_00002.xml")
@@ -792,6 +793,18 @@ optimal_rf
 ##It appears that our optimal model with this seed is 10 candidate variables and 5 minimum observations.
 
 predictions <- predict(object = optimal_rf, new_data = join_tot_test, type = "class" )
+
+
+precision_vec(join_tot_test$a_FMR_fac, predictions$.pred_class, "binary")
+recall_vec(join_tot_test$a_FMR_fac, predictions$.pred_class, "binary")
+
+```
+
+#Summary Visuals
+
+```{r}
+ggplot()
+
 
 
 ```
