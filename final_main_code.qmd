@@ -81,7 +81,7 @@ data_vac <- data_vac %>%
 #below are all variables used in mutation and eval, pared down from all variables due to computational limits. 
 
 data <- data%>%
-  select(RENT, STATEFIP, HHWT, PUMA, BEDROOMS, RENTGRS, COUNTYFIP, TRANTIME, POVERTY, BUILTYR2, KITCHEN, HHINCOME)
+  select(RENT, STATEFIP, HHWT, PUMA, BEDROOMS, RENTGRS, COUNTYFIP, TRANTIME, POVERTY, BUILTYR2, KITCHEN, HHINCOME, DENSITY)
 
 ##Mutating required variables into factor variables for EDA and model implementation
 
@@ -99,7 +99,7 @@ data <- data %>%
 
 data <- data%>%
   group_by(STATEFIP)%>%
-  filter(STATEFIP == 11 || STATEFIP == 24)%>%
+  filter(STATEFIP == 11 | STATEFIP == 24)%>%
   ungroup()
 
 ##proof of STATEFIP filter 
@@ -249,11 +249,26 @@ fairdata %>%
 
 ##in Baltimore and in DC, the difference between fair market rent by PUMA ranges between [x], [y] respectively.  - maybe one where size = density? 
 
+state_labels <- c("11" = "DC", "24" = "Maryland")
+
+ggplot(data = ipums_train_tot,
+       aes(x = vac_ratio, y = mean_rent, color = STATEFIP, size = DENSITY))+
+  geom_point()+
+  labs(title = "DC and Baltimore Mean Rent vs. Vacancy",
+       caption = "Source: IPUMS ACS 1-Year 2021",
+       color = "State",
+       size = "Density (Square Mile)")+
+  scale_color_manual(values = c("11" = "brown1", "24" = "darkturquoise"),
+                     labels = state_labels)+
+  xlab("Vacancy Rate")+
+  ylab("Mean Rent")+
+  theme_classic()
+
 ```
 
-#Final Prep of data 
+#Final Prep of data
 
-## Overall 
+## Overall
 
 ```{r}
 ## filtering FMR data to only the dc and boston areas of consideration
@@ -354,8 +369,7 @@ join_blt <- join_blt %>%
 
 ```
 
-
-#Model Specs - Lasso 
+#Model Specs - Lasso
 
 ##Overall
 
@@ -429,7 +443,6 @@ tot_pred <- predict(tot_final, join_tot, type = "class")
 precision_vec(join_tot$a_FMR_fac, tot_pred$.pred_class, "binary")
 recall_vec(join_tot$a_FMR_fac,tot_pred$.pred_class, "binary")
 ```
-
 
 ##DC
 
@@ -635,7 +648,8 @@ join_dc_test <- join_dc_test %>%
   uncount(HHWT)
 ```
 
-### Test and eval 
+### Test and eval
+
 Now we'll get predictions from our finalized models for the testing data and see what happens.
 
 ```{r}
@@ -676,8 +690,8 @@ prep(rf_rec)
 ## setting up model spec
 ## this section is for sample only, obviously 10 trees is pretty low. 
 
-tune_spec <- rand_forest(
-  min_n = 2,
+exp_spec <- rand_forest(
+  min_n = tune(), 
   trees = 10,
   mtry = tune()
 ) %>%
@@ -685,27 +699,94 @@ tune_spec <- rand_forest(
  set_mode("classification")
 
 ## setting up workflow 
-tune_wf <- workflow() %>%
+exp_wf <- workflow() %>%
   add_recipe(rf_rec) %>%
-  add_model(tune_spec)
+  add_model(exp_spec)
 
 ## implementing WF
-tune_res <- tune_grid(
-  tune_wf,
+exp_res <- tune_grid(
+  exp_wf,
   resamples = tot_folds,
   grid = 20
 )
 
-tune_res
+exp_res
 
-
-tune_res %>%
+results <- exp_res %>%
   collect_metrics() %>%
-  filter(.metric == "roc_auc") %>%
-  ggplot(aes(x = mtry, y = .estimate)) +
+  filter(.metric == "roc_auc")
+
+
+plot_rf_tune1 <- ggplot(data = results, aes(x = mtry, y = mean)) +
   geom_point(show.legend = FALSE) +
   labs(x = NULL, y = "AUC")
 
+plot_rf_tune2 <- ggplot(data = results, aes(x = min_n, y = mean)) +
+  geom_point(show.legend = FALSE) +
+  labs(x =NULL, y = "AUC")
+
+plot_rf_tune1 + plot_rf_tune2
+
 ```
 
+We can see from the above graphic and model specific specification that our best AUC's are with predictors that are between 5-10, whereas our min_n range should be between 5-15. Below we tune these paramters to optimize our AUC.
 
+##Hyperparameter tuned
+
+```{r}
+
+##tuned hyperparameter grid - chose 3 for limited 
+new_grid <- grid_regular(
+  mtry(range = c(5, 10)),
+  min_n(range = c(5, 15)),
+  levels = 3
+)
+
+## implementing wf for tuned product
+tune_rf <- tune_grid(
+  exp_wf,
+  resamples = tot_folds,
+  grid = new_grid
+)
+
+### putting metrics into separate df
+tune_results <- tune_rf %>%
+  collect_metrics() %>%
+  filter(.metric == "roc_auc")
+
+##plotting vor viz
+plot_rf_tuned1 <- ggplot(data = tune_results, aes(x = mtry, y = mean)) +
+  geom_point(show.legend = FALSE) +
+  labs(x = NULL, y = "AUC")
+
+plot_rf_tuned2 <- ggplot(data = tune_results, aes(x = min_n, y = mean)) +
+  geom_point(show.legend = FALSE) +
+  labs(x =NULL, y = "AUC")
+
+plot_rf_tuned1
+plot_rf_tuned2
+
+```
+
+## Finalized model and eval
+
+```{r}
+
+## selecting the best combination of min_n, parameters, paramater counts to optimize AUC
+optimized <- select_best(tune_rf, "roc_auc")
+
+## setting up the model spec
+optimal_rf <- 
+  finalize_workflow(
+    exp_wf, 
+    optimized
+  ) %>%
+  fit(join_tot)
+#viewing results 
+optimal_rf
+
+##It appears that our optimal model with this seed is 10 candidate variables and 5 minimum observations.
+
+predictions <- predict(optimal_rf, join_tot_test)
+
+```
